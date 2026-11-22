@@ -1,137 +1,336 @@
-// Indian Sign Language (ISL) Alphabet Classifier from MediaPipe Hand Landmarks (21 points)
+// Strictly Indian Sign Language (ISL) Two-Handed Alphabet Classifier from MediaPipe Landmarks
+// ISL is predominantly a two-handed sign language (derived from the BANZSL family).
+// Vowels (A, E, I, O, U) use the dominant index pointing to the 5 fingers of the non-dominant hand.
+// Consonants use interactive two-handed shapes (B, D, F, G, H, K, L, M, N, P, Q, R, S, T, V, W, X, Y, Z).
+
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
 
 function fingerExtended(lm, tip, pip, wrist) {
   return dist(lm[tip], wrist) > dist(lm[pip], wrist) * 1.12
 }
 
-export function classifyLetter(lm) {
-  if (!lm || lm.length < 21) return null
-
+function getHandDetails(lm) {
   const wrist = lm[0]
   const handSize = dist(lm[0], lm[9]) || 0.001
 
-  // Finger extension flags
   const index = fingerExtended(lm, 8, 6, wrist)
   const middle = fingerExtended(lm, 12, 10, wrist)
   const ring = fingerExtended(lm, 16, 14, wrist)
   const pinky = fingerExtended(lm, 20, 18, wrist)
 
-  // Thumb analysis
   const thumbOut = dist(lm[4], lm[17]) / handSize > 1.25
-  const thumbUp = lm[4].y < lm[3].y && lm[3].y < lm[2].y
-  const thumbTouchIndex = dist(lm[4], lm[8]) < handSize * 0.28
-  const thumbTouchMiddle = dist(lm[4], lm[12]) < handSize * 0.32
-
   const extendedCount = [index, middle, ring, pinky].filter(Boolean).length
 
-  // Helper distances
-  const indexMiddleDist = dist(lm[8], lm[12])
-  const isHorizontal = (tip, mcp) => Math.abs(lm[tip].x - lm[mcp].x) > Math.abs(lm[tip].y - lm[mcp].y) * 0.85
-  const isPointingDown = (tip, pip) => lm[tip].y > lm[pip].y && lm[pip].y > lm[0].y
+  return {
+    lm,
+    wrist,
+    handSize,
+    index,
+    middle,
+    ring,
+    pinky,
+    thumbOut,
+    extendedCount,
+  }
+}
 
-  // 1. Four fingers extended (B, C)
-  if (extendedCount === 4) {
-    if (!thumbOut) return 'B'
+export function classifyISL(multiHands) {
+  if (!multiHands || !multiHands.length) return null
+
+  // If only 1 hand is visible
+  if (multiHands.length === 1) {
+    const h = getHandDetails(multiHands[0])
+    // C is single-handed curved shape
+    const isCurved =
+      dist(h.lm[8], h.lm[0]) < dist(h.lm[6], h.lm[0]) * 1.15 &&
+      dist(h.lm[8], h.lm[0]) > dist(h.lm[5], h.lm[0]) * 0.85
+    const thumbIndexGap = dist(h.lm[4], h.lm[8])
+    if (isCurved && thumbIndexGap > h.handSize * 0.4 && thumbIndexGap < h.handSize * 0.95) {
+      return 'C'
+    }
+    return null
+  }
+
+  // Two hands visible
+  const h1 = getHandDetails(multiHands[0])
+  const h2 = getHandDetails(multiHands[1])
+  const avgHandSize = (h1.handSize + h2.handSize) / 2
+
+  // Determine base (passive open palm or pointing) vs acting (pointing/shaping) hand
+  let base = h1
+  let acting = h2
+  if (h2.extendedCount > h1.extendedCount) {
+    base = h2
+    acting = h1
+  }
+
+  const actingTip = acting.lm[8] // Dominant index fingertip
+
+  // ==========================================
+  // 1. ISL VOWELS (A, E, I, O, U)
+  // Non-dominant hand flat; dominant index touches one of the 5 fingertips.
+  // Thumb = A, Index = E, Middle = I, Ring = O, Pinky = U
+  // ==========================================
+  if (base.extendedCount >= 3) {
+    const dA = dist(actingTip, base.lm[4])  // Thumb tip
+    const dE = dist(actingTip, base.lm[8])  // Index tip
+    const dI = dist(actingTip, base.lm[12]) // Middle tip
+    const dO = dist(actingTip, base.lm[16]) // Ring tip
+    const dU = dist(actingTip, base.lm[20]) // Pinky tip
+
+    const minVowelDist = Math.min(dA, dE, dI, dO, dU)
+    if (minVowelDist < avgHandSize * 0.48) {
+      if (minVowelDist === dA) return 'A'
+      if (minVowelDist === dE) return 'E'
+      if (minVowelDist === dI) return 'I'
+      if (minVowelDist === dO) return 'O'
+      if (minVowelDist === dU) return 'U'
+    }
+
+    // ==========================================
+    // 2. PALM TOUCH CONSONANTS (M, N, L, V, H, R, Z, T)
+    // Acting fingers resting on or touching base palm
+    // ==========================================
+    const palmCenter = base.lm[9] // MCP of middle finger (center of palm)
+    const distToPalm = dist(actingTip, palmCenter)
+
+    if (distToPalm < avgHandSize * 0.6) {
+      // V: Dominant index & middle spread apart resting on base palm
+      if (acting.index && acting.middle && !acting.ring && !acting.pinky) {
+        const fingerSpread = dist(acting.lm[8], acting.lm[12])
+        if (fingerSpread > avgHandSize * 0.25) return 'V'
+        // N: Two fingers close together on base palm
+        return 'N'
+      }
+
+      // M: Three fingers (index, middle, ring) on base palm
+      if (acting.index && acting.middle && acting.ring && !acting.pinky) {
+        return 'M'
+      }
+
+      // L: Single dominant index resting across base palm
+      if (acting.index && !acting.middle && !acting.ring && !acting.pinky && !acting.thumbOut) {
+        return 'L'
+      }
+
+      // H: Both flat palms sliding across each other
+      if (acting.extendedCount >= 3) {
+        return 'H'
+      }
+
+      // R: Curved index resting in palm
+      if (!acting.middle && !acting.ring && !acting.pinky) {
+        return 'R'
+      }
+
+      // Z: Perpendicular hand edge touching palm
+      return 'Z'
+    }
+
+    // T: Dominant index touches lower edge of base hand near wrist
+    if (dist(actingTip, base.wrist) < avgHandSize * 0.42) {
+      return 'T'
+    }
+
+    // Y: Dominant index placed in the crook between thumb & index of base hand
+    if (dist(actingTip, base.lm[2]) < avgHandSize * 0.4) {
+      return 'Y'
+    }
+  }
+
+  // ==========================================
+  // 3. X: Crossed Index Fingers
+  // ==========================================
+  if (h1.index && !h1.ring && !h1.pinky && h2.index && !h2.ring && !h2.pinky) {
+    const indexCrossDist = dist(h1.lm[8], h2.lm[7])
+    const indexCrossDist2 = dist(h2.lm[8], h1.lm[7])
+    const tipDist = dist(h1.lm[8], h2.lm[8])
+    if (Math.min(indexCrossDist, indexCrossDist2, tipDist) < avgHandSize * 0.42) {
+      return 'X'
+    }
+  }
+
+  // ==========================================
+  // 4. G: Stacked Fists (Both closed, one on top of the other)
+  // ==========================================
+  if (h1.extendedCount === 0 && h2.extendedCount === 0) {
+    const xDiff = Math.abs(h1.wrist.x - h2.wrist.x)
+    const yDiff = Math.abs(h1.wrist.y - h2.wrist.y)
+    if (xDiff < avgHandSize * 1.1 && yDiff > avgHandSize * 0.35 && yDiff < avgHandSize * 1.8) {
+      return 'G'
+    }
+  }
+
+  // ==========================================
+  // 5. B: Double Loop (Thumbs and index fingers of both hands touching)
+  // ==========================================
+  const indexDist = dist(h1.lm[8], h2.lm[8])
+  const thumbDist = dist(h1.lm[4], h2.lm[4])
+  if (indexDist < avgHandSize * 0.42 && thumbDist < avgHandSize * 0.42) {
     return 'B'
   }
 
-  // 2. Three fingers extended (W, F)
-  if (extendedCount === 3) {
-    if (thumbTouchIndex && middle && ring && pinky) return 'F'
-    if (index && middle && ring && !pinky) return 'W'
+  // ==========================================
+  // 6. D, K, P: Upright Index Base Hand
+  // Base index pointing up, acting hand forms loop or touches joint
+  // ==========================================
+  const isUpright = (h) => h.index && !h.middle && !h.ring && !h.pinky && h.lm[8].y < h.lm[6].y
+  if (isUpright(base)) {
+    // P: Loop formed at the top of the upright index
+    if (dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.38 && dist(acting.lm[4], base.lm[8]) < avgHandSize * 0.38) {
+      return 'P'
+    }
+    // D: Acting thumb and index touch base index to complete 'D'
+    if (dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.45 && dist(acting.lm[4], base.lm[5]) < avgHandSize * 0.45) {
+      return 'D'
+    }
+    // K: Acting hooked index touches the joint of base index
+    if (dist(acting.lm[8], base.lm[6]) < avgHandSize * 0.38) {
+      return 'K'
+    }
   }
 
-  // 3. Two fingers extended (V, U, R, K, H, P)
-  if (index && middle && !ring && !pinky) {
-    if (isPointingDown(8, 6) && isPointingDown(12, 10)) return 'P'
-    if (isHorizontal(8, 5) && isHorizontal(12, 9)) return 'H'
-    // Crossed fingers
-    if (indexMiddleDist < handSize * 0.16) return 'R'
-    // Thumb between index and middle
-    if (thumbUp && dist(lm[4], lm[10]) < handSize * 0.32) return 'K'
-    // Spread vs together
-    if (indexMiddleDist > handSize * 0.28) return 'V'
-    return 'U'
+  // ==========================================
+  // 7. F: Crossed Pairs of Fingers (2 fingers cross 2 fingers)
+  // ==========================================
+  if (h1.index && h1.middle && !h1.ring && !h1.pinky && h2.index && h2.middle && !h2.ring && !h2.pinky) {
+    if (dist(h1.lm[8], h2.lm[10]) < avgHandSize * 0.45 && dist(h2.lm[8], h1.lm[10]) < avgHandSize * 0.45) {
+      return 'F'
+    }
   }
 
-  // 4. One finger extended (L, D, G, I, J, X, Z)
-  if (index && !middle && !ring && !pinky) {
-    if (thumbOut && dist(lm[4], lm[8]) > handSize * 0.65) return 'L'
-    if (thumbTouchMiddle) return 'D'
-    if (isHorizontal(8, 5)) return 'G'
-    if (isPointingDown(8, 6) && lm[4].y > lm[2].y) return 'Q'
-    // Hooked index
-    const indexHooked = dist(lm[8], lm[5]) < handSize * 0.52
-    if (indexHooked) return 'X'
-    return 'Z'
+  // ==========================================
+  // 8. W: Both Hands Interlocked/Upright (W Shape)
+  // ==========================================
+  if (h1.extendedCount >= 3 && h2.extendedCount >= 3) {
+    if (dist(h1.lm[8], h2.lm[8]) < avgHandSize * 0.45 && dist(h1.lm[12], h2.lm[12]) < avgHandSize * 0.5) {
+      return 'W'
+    }
   }
 
-  // Only pinky extended (I, Y)
-  if (!index && !middle && !ring && pinky) {
-    if (thumbOut) return 'Y'
-    return 'I'
+  // ==========================================
+  // 9. S: Pinkies Hooked Together
+  // ==========================================
+  if (dist(h1.lm[20], h2.lm[20]) < avgHandSize * 0.32) {
+    return 'S'
   }
 
-  // 5. Thumb + Pinky only (Y or J)
-  if (thumbOut && pinky && !index && !middle && !ring) {
-    return 'Y'
-  }
-
-  // 6. Curved Hand (C, O)
-  const isCurved = dist(lm[8], lm[0]) < dist(lm[6], lm[0]) * 1.15 && dist(lm[8], lm[0]) > dist(lm[5], lm[0]) * 0.9
-  if (isCurved && dist(lm[4], lm[8]) < handSize * 0.45 && !thumbTouchIndex) {
-    if (dist(lm[4], lm[8]) < handSize * 0.26 && dist(lm[4], lm[12]) < handSize * 0.32) return 'O'
-    return 'C'
-  }
-
-  // 7. Closed Fist Shapes (0 extended fingers: A, E, M, N, S, T)
-  if (extendedCount === 0) {
-    // Thumb tucked between index and middle
-    if (dist(lm[4], lm[6]) < handSize * 0.26) return 'T'
-    // Thumb tucked under ring finger
-    if (dist(lm[4], lm[14]) < handSize * 0.28) return 'M'
-    // Thumb tucked under middle finger
-    if (dist(lm[4], lm[10]) < handSize * 0.28) return 'N'
-    // Thumb crossed in front of fingers
-    if (dist(lm[4], lm[9]) < handSize * 0.35 && lm[4].y < lm[10].y) return 'S'
-    // E: Fingertips curled against palm, thumb tucked at bottom
-    if (lm[4].y > lm[8].y && lm[4].y > lm[12].y) return 'E'
-    // A: Thumb upright or alongside index
-    if (thumbUp || lm[4].y < lm[6].y) return 'A'
-    return 'A'
+  // ==========================================
+  // 10. Q: Hook through Loop
+  // ==========================================
+  const isLoop = (h) => dist(h.lm[4], h.lm[8]) < avgHandSize * 0.3
+  if (isLoop(base) && dist(actingTip, base.lm[8]) < avgHandSize * 0.38) {
+    return 'Q'
   }
 
   return null
 }
 
 export const LETTER_GUIDES = {
-  A: { en: 'Make a fist with your thumb resting upright alongside your index finger.', hi: 'मुट्ठी बनाएँ, अंगूठा तर्जनी की बगल में सीधा रखें।' },
-  B: { en: 'Hold four fingers straight up together, thumb folded across your palm.', hi: 'चारों उंगलियाँ सीधी ऊपर सटाकर रखें और अंगूठे को हथेली पर मोड़ें।' },
-  C: { en: 'Curve your fingers and thumb forward into a C shape.', hi: 'उंगलियों और अंगूठे को मोड़कर C का आकार बनाएँ।' },
-  D: { en: 'Index finger pointing straight up, thumb touching middle fingertip to form a loop.', hi: 'तर्जनी सीधी ऊपर रखें, अंगूठे को मध्यमा से मिलाकर घेरा बनाएँ।' },
-  E: { en: 'Curl all fingertips tightly down into your palm with thumb tucked underneath.', hi: 'सभी उंगलियाँ नीचे मोड़ें और अंगूठे को नीचे दबाएँ।' },
-  F: { en: 'Touch index tip to thumb tip, keeping other three fingers extended straight up.', hi: 'तर्जनी और अंगूठे के सिरे मिलाएँ, बाकी तीन उंगलियाँ ऊपर सीधी रखें।' },
-  G: { en: 'Point your index finger horizontally forward with thumb parallel.', hi: 'तर्जनी उंगली को क्षैतिज रूप से आगे की ओर करें।' },
-  H: { en: 'Extend index and middle fingers together horizontally forward.', hi: 'तर्जनी और मध्यमा दोनों उंगलियाँ आगे की ओर सीधी रखें।' },
-  I: { en: 'Extend only your pinky finger straight up, keeping other fingers closed.', hi: 'सिर्फ सबसे छोटी उंगली (कनिष्ठिका) को ऊपर सीधा रखें।' },
-  J: { en: 'Extend your pinky finger and trace a small hook shape.', hi: 'छोटी उंगली सीधी रखकर हल्का सा घुमावदार आकार बनाएँ।' },
-  K: { en: 'Extend index finger up, middle finger forward, thumb between them.', hi: 'तर्जनी सीधी ऊपर, मध्यमा आगे और अंगूठा दोनों के बीच रखें।' },
-  L: { en: 'Extend your index finger up and thumb sideways to form an L shape.', hi: 'तर्जनी सीधी ऊपर और अंगूठा फैलाकर L आकार बनाएँ।' },
-  M: { en: 'Fold your three fingers (index, middle, ring) over your tucked thumb.', hi: 'अंगूठे को मोड़कर उसके ऊपर तीन उंगलियाँ रखें।' },
-  N: { en: 'Fold your index and middle fingers over your tucked thumb.', hi: 'अंगूठे के ऊपर सिर्फ दो उंगलियाँ (तर्जनी व मध्यमा) रखें।' },
-  O: { en: 'Touch all fingertips to your thumb tip forming an O shape.', hi: 'सभी उंगलियों के सिरे अंगूठे से मिलाकर O का आकार बनाएँ।' },
-  P: { en: 'Point your index and middle fingers downwards with thumb supporting.', hi: 'तर्जनी और मध्यमा को नीचे की ओर झुकाकर रखें।' },
-  Q: { en: 'Point index and thumb downward together like a hook.', hi: 'तर्जनी और अंगूठे को नीचे की ओर हुक के रूप में रखें।' },
-  R: { en: 'Cross your middle finger over your index finger.', hi: 'मध्यमा उंगली को तर्जनी के ऊपर क्रॉस करके रखें।' },
-  S: { en: 'Make a tight fist with thumb folded across the front of all fingers.', hi: 'मुट्ठी बनाएँ और अंगूठे को उंगलियों के ऊपर कसकर रखें।' },
-  T: { en: 'Tuck thumb between your index and middle finger in a fist.', hi: 'अंगूठे को तर्जनी और मध्यमा के बीच से बाहर निकालें।' },
-  U: { en: 'Hold index and middle fingers straight up tightly together.', hi: 'तर्जनी और मध्यमा दोनों उंगलियों को सटाकर सीधा ऊपर रखें।' },
-  V: { en: 'Extend index and middle fingers spread apart in a V shape.', hi: 'तर्जनी और मध्यमा उंगलियाँ फैलाकर V आकार बनाएँ।' },
-  W: { en: 'Extend index, middle, and ring fingers spread apart in a W.', hi: 'तर्जनी, मध्यमा और अनामिका तीनों उंगलियाँ फैलाकर W बनाएँ।' },
-  X: { en: 'Bend your index finger into a hook shape, others closed.', hi: 'तर्जनी उंगली को मोड़कर हुक का आकार बनाएँ।' },
-  Y: { en: 'Extend your thumb and pinky finger outward, other three folded.', hi: 'अंगूठा और छोटी उंगली बाहर फैलाएँ, बाकी तीन मोड़ें।' },
-  Z: { en: 'Point index finger forward and trace a Z shape.', hi: 'तर्जनी उंगली से हवा में Z का आकार बनाएँ।' },
+  A: {
+    en: 'Hold your non-dominant hand flat; touch the THUMB tip with your dominant index finger.',
+    hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसके अंगूठे (Thumb) के सिरे को छुएँ।',
+  },
+  B: {
+    en: 'Touch the thumbs and index fingers of both hands together to form the double loop of B.',
+    hi: 'दोनों हाथों के अंगूठे और तर्जनी को आपस में मिलाकर B के दो घेरे बनाएँ।',
+  },
+  C: {
+    en: 'Curve your dominant hand into a C shape with fingers and thumb in an arc.',
+    hi: 'अपने हाथ की उंगलियों और अंगूठे को मोड़कर C का स्पष्ट आकार बनाएँ।',
+  },
+  D: {
+    en: 'Hold non-dominant index straight up; touch its tip and base with dominant thumb and index to form D.',
+    hi: 'बाएँ हाथ की तर्जनी सीधी ऊपर रखें; दाएँ हाथ के अंगूठे व तर्जनी से अर्धवृत्त बनाकर D बनाएँ।',
+  },
+  E: {
+    en: 'Hold non-dominant hand flat; touch the INDEX fingertip with your dominant index finger.',
+    hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी तर्जनी (Index finger) के सिरे को छुएँ।',
+  },
+  F: {
+    en: 'Place two fingers (index & middle) of dominant hand across two fingers of non-dominant hand.',
+    hi: 'एक हाथ की दो उंगलियों (तर्जनी व मध्यमा) पर दूसरे हाथ की दो उंगलियाँ क्रॉस करके रखें।',
+  },
+  G: {
+    en: 'Make two closed fists and stack your dominant fist directly on top of the non-dominant fist.',
+    hi: 'दोनों हाथों की मुट्ठियाँ बनाएँ और एक मुट्ठी को दूसरी मुट्ठी के ऊपर रखें।',
+  },
+  H: {
+    en: 'Hold non-dominant hand flat; sweep your dominant flat palm across it from wrist to fingers.',
+    hi: 'एक हथेली सीधी रखें और दूसरे हाथ की हथेली से उस पर सीधी रेखा खींचें।',
+  },
+  I: {
+    en: 'Hold non-dominant hand flat; touch the MIDDLE fingertip with your dominant index finger.',
+    hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी बीच वाली उंगली (मध्यमा) के सिरे को छुएँ।',
+  },
+  J: {
+    en: 'Touch the middle fingertip of non-dominant hand, then trace down into the center of the palm.',
+    hi: 'मध्यमा उंगली के सिरे से शुरू करके हथेली के बीच तक नीचे की ओर उंगली घुमाएँ।',
+  },
+  K: {
+    en: 'Hold non-dominant index straight up; touch its joint with dominant hooked index finger.',
+    hi: 'एक हाथ की तर्जनी सीधी रखें, दूसरे हाथ की मुड़ी हुई तर्जनी से उसके जोड़ को छुएँ।',
+  },
+  L: {
+    en: 'Hold non-dominant hand flat palm up; place dominant index finger flat across it to form L.',
+    hi: 'खुली हथेली पर दूसरे हाथ की तर्जनी उंगली क्षैतिज रखकर L का आकार बनाएँ।',
+  },
+  M: {
+    en: 'Place THREE fingers (index, middle, ring) of dominant hand on non-dominant open palm.',
+    hi: 'खुली हथेली पर दूसरे हाथ की तीन उंगलियाँ (तर्जनी, मध्यमा, अनामिका) रखें।',
+  },
+  N: {
+    en: 'Place TWO fingers (index, middle) of dominant hand on non-dominant open palm.',
+    hi: 'खुली हथेली पर दूसरे हाथ की दो उंगलियाँ (तर्जनी व मध्यमा) रखें।',
+  },
+  O: {
+    en: 'Hold non-dominant hand flat; touch the RING fingertip with your dominant index finger.',
+    hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी अनामिका (Ring finger) के सिरे को छुएँ।',
+  },
+  P: {
+    en: 'Hold non-dominant index straight up; form a loop with dominant thumb and index at its top.',
+    hi: 'एक हाथ की तर्जनी सीधी ऊपर रखें; दूसरे हाथ के अंगूठे व तर्जनी से उसके शीर्ष पर P का घेरा बनाएँ।',
+  },
+  Q: {
+    en: 'Form a circle with non-dominant thumb and index; hook your dominant index into it.',
+    hi: 'एक हाथ से घेरा बनाएँ और दूसरे हाथ की तर्जनी को उसमें हुक की तरह जोड़ें।',
+  },
+  R: {
+    en: 'Hook your dominant index finger and rest it curved in the palm of non-dominant hand.',
+    hi: 'दाएँ हाथ की तर्जनी को हल्का सा मोड़कर बाएँ हाथ की खुली हथेली पर रखें।',
+  },
+  S: {
+    en: 'Hook your dominant pinky finger over non-dominant pinky finger.',
+    hi: 'दोनों हाथों की छोटी उंगलियों (पिंकी) को आपस में फँसाएँ।',
+  },
+  T: {
+    en: 'Touch dominant index finger to the lower edge of non-dominant hand near the wrist.',
+    hi: 'खुले हाथ के निचले किनारे पर दूसरे हाथ की तर्जनी उंगली छुएँ।',
+  },
+  U: {
+    en: 'Hold non-dominant hand flat; touch the PINKY fingertip with your dominant index finger.',
+    hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी सबसे छोटी उंगली (कनिष्ठिका) के सिरे को छुएँ।',
+  },
+  V: {
+    en: 'Make a V sign (two spread fingers) with dominant hand and place its tips on non-dominant palm.',
+    hi: 'दाएँ हाथ से V (दो उंगलियाँ फैलाकर) बनाएँ और बाएँ हाथ की हथेली पर रखें।',
+  },
+  W: {
+    en: 'Interlock the fingers of both hands together with fingertips pointing upwards.',
+    hi: 'दोनों हाथों की उंगलियों को आपस में जोड़कर W का आकार बनाएँ।',
+  },
+  X: {
+    en: 'Cross both index fingers over each other to form an X shape.',
+    hi: 'दोनों हाथों की तर्जनी उंगलियों को एक-दूसरे के ऊपर क्रॉस करके X बनाएँ।',
+  },
+  Y: {
+    en: 'Spread non-dominant thumb and index; place dominant index in the crook between them.',
+    hi: 'बाएँ हाथ के अंगूठे और तर्जनी के बीच दाएँ हाथ की तर्जनी उंगली रखें।',
+  },
+  Z: {
+    en: 'Hold non-dominant hand vertical; place dominant hand flat against it perpendicularly.',
+    hi: 'एक हाथ सीधा खड़ा रखें, दूसरा हाथ उसकी हथेली के बीच में 90 डिग्री पर रखें।',
+  },
 }
 
 export const EMERGENCY_PHRASES = [
@@ -152,10 +351,9 @@ const CONNECTIONS = [
 ]
 
 export function drawHand(ctx, lm, w, h) {
-  ctx.clearRect(0, 0, w, h)
   ctx.strokeStyle = '#3ea6ff'
   ctx.fillStyle = '#ff4e45'
-  ctx.lineWidth = 2
+  ctx.lineWidth = 2.5
   for (const [a, b] of CONNECTIONS) {
     ctx.beginPath()
     ctx.moveTo(lm[a].x * w, lm[a].y * h)
@@ -164,7 +362,7 @@ export function drawHand(ctx, lm, w, h) {
   }
   for (const p of lm) {
     ctx.beginPath()
-    ctx.arc(p.x * w, p.y * h, 3.5, 0, Math.PI * 2)
+    ctx.arc(p.x * w, p.y * h, 4, 0, Math.PI * 2)
     ctx.fill()
   }
 }

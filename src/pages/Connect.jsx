@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useSettings } from '../context/SettingsContext'
 import { useSpeech, useDictation } from '../hooks/useSpeech'
-import { classifyLetter, drawHand, LETTER_GUIDES, EMERGENCY_PHRASES } from '../utils/gesture'
+import { classifyISL, drawHand, LETTER_GUIDES, EMERGENCY_PHRASES } from '../utils/gesture'
 
 function HandTracker({ onLetter, active }) {
   const videoRef = useRef(null)
@@ -11,6 +11,7 @@ function HandTracker({ onLetter, active }) {
   const [mirrored, setMirrored] = useState(true)
   const [error, setError] = useState('')
   const [liveLetter, setLiveLetter] = useState(null)
+  const [handsTracked, setHandsTracked] = useState(0)
   const streamRef = useRef(null)
   const cameraRef = useRef(null)
   const stableRef = useRef({ letter: null, count: 0 })
@@ -24,6 +25,7 @@ function HandTracker({ onLetter, active }) {
     streamRef.current = null
     setRunning(false)
     setLiveLetter(null)
+    setHandsTracked(0)
   }, [])
 
   const start = useCallback(async () => {
@@ -50,8 +52,9 @@ function HandTracker({ onLetter, active }) {
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`,
       })
 
+      // Strict Two-Handed Tracking for Indian Sign Language (ISL)
       hands.setOptions({
-        maxNumHands: 1,
+        maxNumHands: 2,
         modelComplexity: 0,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
@@ -63,17 +66,25 @@ function HandTracker({ onLetter, active }) {
         const ctx = canvas.getContext('2d')
         canvas.width = video.videoWidth || 640
         canvas.height = video.videoHeight || 480
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
 
         if (res.multiHandLandmarks && res.multiHandLandmarks.length) {
-          const lm = res.multiHandLandmarks[0]
-          drawHand(ctx, lm, canvas.width, canvas.height)
-          const letter = classifyLetter(lm)
+          // Draw both hands
+          for (const lm of res.multiHandLandmarks) {
+            drawHand(ctx, lm, canvas.width, canvas.height)
+          }
+
+          const count = res.multiHandLandmarks.length
+          setHandsTracked(count)
+
+          // Strictly Indian Sign Language classifier
+          const letter = classifyISL(res.multiHandLandmarks)
           setLiveLetter(letter)
 
           const s = stableRef.current
           if (letter && letter === s.letter) {
             s.count += 1
-            // Fast 4-frame stability (~130-160ms for instant detection)
+            // 4 consecutive frames (~140ms) for fast responsive ISL recognition
             if (s.count === 4) {
               onLetter(letter)
             }
@@ -81,9 +92,9 @@ function HandTracker({ onLetter, active }) {
             stableRef.current = { letter, count: 1 }
           }
         } else {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          stableRef.current = { letter: null, count: 0 }
+          setHandsTracked(0)
           setLiveLetter(null)
+          stableRef.current = { letter: null, count: 0 }
         }
       })
 
@@ -113,26 +124,42 @@ function HandTracker({ onLetter, active }) {
       <video ref={videoRef} muted playsInline />
       <canvas ref={canvasRef} />
 
-      {running && liveLetter && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            background: 'rgba(15, 15, 15, 0.9)',
-            border: '2px solid var(--blue)',
-            padding: '4px 12px',
-            borderRadius: 8,
-            fontSize: '1rem',
-            color: '#fff',
-            fontWeight: 700,
-            zIndex: 10,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span className="pulse-dot" style={{ background: 'var(--blue)' }} /> ISL: {liveLetter}
+      {running && (
+        <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', zIndex: 10 }}>
+          <div
+            style={{
+              background: 'rgba(15, 15, 15, 0.9)',
+              border: `1px solid ${handsTracked === 2 ? 'var(--success)' : '#ff9800'}`,
+              padding: '4px 10px',
+              borderRadius: 6,
+              fontSize: '0.78rem',
+              color: handsTracked === 2 ? 'var(--success)' : '#ff9800',
+              fontWeight: 600,
+            }}
+          >
+            {handsTracked === 2
+              ? '● 2 Hands Tracked (ISL Active)'
+              : handsTracked === 1
+              ? '▲ 1 Hand (ISL is Two-Handed — Raise 2nd Hand)'
+              : 'Show Both Hands'}
+          </div>
+
+          {liveLetter && (
+            <div
+              style={{
+                background: 'rgba(15, 15, 15, 0.95)',
+                border: '2px solid var(--blue)',
+                padding: '4px 14px',
+                borderRadius: 8,
+                fontSize: '1.2rem',
+                color: '#fff',
+                fontWeight: 700,
+                boxShadow: '0 4px 14px rgba(62, 166, 255, 0.4)',
+              }}
+            >
+              ISL: {liveLetter}
+            </div>
+          )}
         </div>
       )}
 
@@ -206,7 +233,7 @@ export default function Connect() {
       <div className="module-head">
         <h1 className="section-title" style={{ margin: 0 }}>{t('nav_connect')}</h1>
         <span className="live-badge">
-          <span className="pulse-dot" /> INDIAN SIGN LANGUAGE (ISL A–Z)
+          <span className="pulse-dot" /> STRICTLY INDIAN SIGN LANGUAGE (ISL A–Z)
         </span>
         <Link to="/dashboard" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-ghost btn-sm">← {t('back_dashboard')}</button>
@@ -214,10 +241,10 @@ export default function Connect() {
       </div>
 
       <div className="tabs">
-        {tabBtn('sign', lang === 'hi' ? 'साइन टू टेक्स्ट (ISL)' : 'Sign to Text (ISL)')}
+        {tabBtn('sign', lang === 'hi' ? 'ISL दो-हाथ सांकेतिक भाषा (A–Z)' : 'ISL Two-Handed Signing (A–Z)')}
         {tabBtn('type', t('type_speak_title'))}
         {tabBtn('emergency', t('emergency_title'))}
-        {tabBtn('learn', lang === 'hi' ? 'ISL सीखें (लर्निंग मोड)' : 'Learn ISL Alphabet')}
+        {tabBtn('learn', lang === 'hi' ? 'ISL वर्णमाला सीखें (A–Z)' : 'Learn ISL Alphabet (A–Z)')}
       </div>
 
       {tab === 'sign' && (
@@ -225,8 +252,8 @@ export default function Connect() {
           <section className="card">
             <p style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>
               {lang === 'hi'
-                ? 'कैमरे के सामने कोई भी ISL वर्णमाला (A–Z) साइन करें। पहचाने गए अक्षर तुरंत आपके वाक्य में जुड़ जाएँगे।'
-                : 'Show any Indian Sign Language (ISL) alphabet sign (A–Z) to the camera. Recognized letters are added to your sentence in real-time.'}
+                ? 'भारतीय सांकेतिक भाषा (ISL) दो-हाथी प्रणाली है। कैमरे के सामने दोनों हाथ लाएँ (स्वर A, E, I, O, U के लिए एक हाथ की तर्जनी से दूसरे हाथ की 5 उंगलियों को छुएँ)।'
+                : 'Indian Sign Language (ISL) is a two-handed system. Hold up both hands to the camera (e.g. for vowels A, E, I, O, U, touch the 5 fingertips of your open hand with your index finger).'}
             </p>
             <HandTracker onLetter={addLetter} active />
           </section>
@@ -278,7 +305,7 @@ export default function Connect() {
       {tab === 'learn' && (
         <div className="grid grid-2">
           <section className="card">
-            <div className="sub">{t('select_letter')} (ISL A–Z)</div>
+            <div className="sub">{t('select_letter')} (Official ISL Two-Handed A–Z)</div>
             <div className="letter-picker" style={{ maxHeight: 220, overflowY: 'auto' }}>
               {lettersList.map((l) => (
                 <button
@@ -292,11 +319,15 @@ export default function Connect() {
             </div>
 
             <div className="guide-panel" style={{ marginTop: '1rem' }}>
-              <div className="sub">{t('handshape_guide')} — ISL "{target}"</div>
+              <div className="sub">{t('handshape_guide')} — Official ISL "{target}"</div>
               <p style={{ marginTop: '0.5rem', fontWeight: 500 }}>
                 {LETTER_GUIDES[target] ? LETTER_GUIDES[target][lang] : ''}
               </p>
-              <p style={{ marginTop: '0.8rem', color: 'var(--blue)', fontSize: '0.85rem' }}>{t('perform_sign')}</p>
+              <p style={{ marginTop: '0.8rem', color: 'var(--blue)', fontSize: '0.85rem' }}>
+                {lang === 'hi'
+                  ? 'अब दोनों हाथों से कैमरे के सामने यह ISL चिन्ह बनाएँ।'
+                  : 'Now perform this two-handed ISL sign in front of your camera.'}
+              </p>
             </div>
 
             {feedback && (
