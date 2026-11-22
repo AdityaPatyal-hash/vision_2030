@@ -57,7 +57,15 @@ export default function Vision() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      let stream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        })
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true })
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -67,8 +75,6 @@ export default function Vision() {
       setCamError(false)
       sceneRef.current = ''
       timerRef.current = setInterval(() => {
-        // Demo-mode inference: pick 1–3 sample objects. Swap this block with a
-        // POST to http://localhost:8000/detect to run real YOLO inference.
         const count = 1 + Math.floor(Math.random() * 3)
         const pool = [...SAMPLE_OBJECTS].sort(() => Math.random() - 0.5).slice(0, count)
         const dets = pool.map((o, i) => ({ ...o, ...randomBox(i) }))
@@ -86,18 +92,40 @@ export default function Vision() {
 
   useEffect(() => () => stopCamera(), [stopCamera])
 
-  const runOcr = async (file) => {
+  const runOcr = async (source) => {
     setOcrBusy(true)
     setOcrText('')
     try {
-      const { data } = await Tesseract.recognize(file, lang === 'hi' ? 'eng' : 'eng')
+      const ocrLang = lang === 'hi' ? 'hin' : 'eng'
+      const { data } = await Tesseract.recognize(source, ocrLang)
       const text = (data.text || '').trim()
       setOcrText(text || (lang === 'hi' ? 'कोई टेक्स्ट नहीं मिला।' : 'No text found in this image.'))
     } catch {
-      setOcrText(lang === 'hi' ? 'OCR विफल। पुनः प्रयास करें।' : 'OCR failed. Please try again.')
+      try {
+        const { data } = await Tesseract.recognize(source, 'eng')
+        const text = (data.text || '').trim()
+        setOcrText(text || (lang === 'hi' ? 'कोई टेक्स्ट नहीं मिला।' : 'No text found in this image.'))
+      } catch {
+        setOcrText(lang === 'hi' ? 'OCR विफल। पुनः प्रयास करें।' : 'OCR failed. Please try again.')
+      }
     } finally {
       setOcrBusy(false)
     }
+  }
+
+  const captureFrame = () => {
+    if (!videoRef.current) return
+    const video = videoRef.current
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      setImage(URL.createObjectURL(blob))
+      runOcr(blob)
+    }, 'image/jpeg', 0.95)
   }
 
   const onUpload = (e) => {
@@ -142,6 +170,11 @@ export default function Vision() {
             ) : (
               <button className="btn btn-ghost" onClick={stopCamera}>{t('stop_camera')}</button>
             )}
+            {streaming && (
+              <button className="btn btn-ghost" onClick={captureFrame}>
+                {lang === 'hi' ? 'कैमरे से टेक्स्ट पढ़ें' : '📷 Capture & Read Text'}
+              </button>
+            )}
             {speaking
               ? <button className="btn btn-ghost" onClick={stop}>{t('stop_speaking')}</button>
               : <button className="btn btn-ghost" disabled={!detections.length} onClick={() => describeScene(detections)}>{t('read_aloud')}</button>}
@@ -152,11 +185,16 @@ export default function Vision() {
           <h3 style={{ marginBottom: '0.4rem' }}>{t('ocr_title')}</h3>
           <p style={{ marginBottom: '1rem' }}>{t('ocr_desc')}</p>
           {image && <img className="ocr-preview" src={image} alt="uploaded" />}
-          <div style={{ marginTop: '1rem' }}>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.7rem', flexWrap: 'wrap' }}>
             <input type="file" accept="image/*" id="ocr-upload" hidden onChange={onUpload} />
             <label htmlFor="ocr-upload" style={{ margin: 0, display: 'inline-block' }}>
-              <span className="btn">{t('upload_image')}</span>
+              <span className="btn btn-ghost">{t('upload_image')}</span>
             </label>
+            {streaming && (
+              <button className="btn" onClick={captureFrame}>
+                {lang === 'hi' ? 'कैमरे से कैप्चर करें' : '📷 Capture from Camera'}
+              </button>
+            )}
           </div>
           <label>{t('extracted_text')}</label>
           <div className="ocr-text-box">

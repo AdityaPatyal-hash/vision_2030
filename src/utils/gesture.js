@@ -56,8 +56,8 @@ const CONNECTIONS = [
 
 export function drawHand(ctx, lm, w, h) {
   ctx.clearRect(0, 0, w, h)
-  ctx.strokeStyle = '#22d3ee'
-  ctx.fillStyle = '#a78bfa'
+  ctx.strokeStyle = '#3ea6ff'
+  ctx.fillStyle = '#ff4e45'
   ctx.lineWidth = 2
   for (const [a, b] of CONNECTIONS) {
     ctx.beginPath()

@@ -24,7 +24,7 @@ export default function Dashboard() {
           <Link to="/vision">
             <div className="card">
               <div className="card-icon">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.8">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color: 'var(--blue)' }}>
                   <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
                 </svg>
               </div>
@@ -45,7 +45,7 @@ export default function Dashboard() {
           <Link to="/connect">
             <div className="card">
               <div className="card-icon">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.8">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color: 'var(--red)' }}>
                   <path d="M12 2a4 4 0 0 1 4 4v3a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z" />
                   <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
                 </svg>

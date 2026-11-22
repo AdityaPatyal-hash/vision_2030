@@ -44,7 +44,7 @@ export default function Landing() {
           <Link to="/vision">
             <motion.div className="card" whileHover={{ scale: 1.02 }}>
               <div className="card-icon">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.8">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color: 'var(--blue)' }}>
                   <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" />
                 </svg>
               </div>
@@ -58,7 +58,7 @@ export default function Landing() {
           <Link to="/connect">
             <motion.div className="card" whileHover={{ scale: 1.02 }}>
               <div className="card-icon">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.8">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color: 'var(--red)' }}>
                   <path d="M12 2a4 4 0 0 1 4 4v3a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z" />
                   <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
                 </svg>
@@ -78,8 +78,8 @@ export default function Landing() {
         <div className="grid grid-3" style={{ marginTop: '1.4rem' }}>
           {['how_1', 'how_2', 'how_3'].map((k, i) => (
             <motion.div className="card" key={k} whileHover={{ y: -4 }}>
-              <div className="card-icon" style={{ background: 'rgba(59,130,246,0.15)', borderColor: 'rgba(59,130,246,0.4)' }}>
-                <b style={{ color: '#60a5fa', fontSize: '1.3rem' }}>{i + 1}</b>
+              <div className="card-icon">
+                <b style={{ color: '#ffffff', fontSize: '1.2rem' }}>{i + 1}</b>
               </div>
               <h3>{t(`${k}_t`)}</h3>
               <p>{t(`${k}_d`)}</p>
