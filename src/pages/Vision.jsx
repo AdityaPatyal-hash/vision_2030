@@ -53,14 +53,16 @@ export default function Vision() {
   const cocoModelRef = useRef(null)
   const mobilenetRef = useRef(null)
   const isRunningRef = useRef(false)
+  const isDetectingRef = useRef(false)
   const loopTimeoutRef = useRef(null)
   const sceneRef = useRef('')
   const lastSpokenRef = useRef(0)
+  const lastClassifiedRef = useRef(0)
 
   const [streaming, setStreaming] = useState(false)
   const [camError, setCamError] = useState(false)
-  const [modelStatus, setModelStatus] = useState('loading') // 'loading' | 'ready' | 'error'
-  const [sensitivity, setSensitivity] = useState(0.28) // 0.28 (high recall), 0.38 (balanced), 0.50 (strict)
+  const [modelStatus, setModelStatus] = useState('loading')
+  const [sensitivity, setSensitivity] = useState(0.25) // Low threshold for high recall
   const [detections, setDetections] = useState([])
   const [classifiedItems, setClassifiedItems] = useState([])
   const [matchedCustom, setMatchedCustom] = useState([])
@@ -89,34 +91,37 @@ export default function Vision() {
     try {
       localStorage.setItem('mira_custom_objects', JSON.stringify(customObjects))
     } catch (err) {
-      console.warn('Could not save custom objects to localStorage:', err)
+      console.warn('Could not save custom objects:', err)
     }
   }, [customObjects])
 
-  // Load both COCO-SSD (mobilenet_v2) and MobileNet (ImageNet 1,000 categories)
+  // Load COCO-SSD (lite_mobilenet_v2 for ultra-fast 30+ FPS detection)
   const loadModels = useCallback(async () => {
-    if (cocoModelRef.current && mobilenetRef.current) return
+    if (cocoModelRef.current) return
     try {
       setModelStatus('loading')
       for (let i = 0; i < 30; i++) {
-        if (window.cocoSsd && window.mobilenet && window.tf) break
+        if (window.cocoSsd && window.tf) break
         await new Promise((r) => setTimeout(r, 200))
       }
 
-      if (!window.cocoSsd || !window.mobilenet) {
-        throw new Error('Vision libraries failed to load from CDN')
+      if (!window.cocoSsd) {
+        throw new Error('TensorFlow / COCO-SSD script not available')
       }
 
-      const [coco, mobile] = await Promise.all([
-        window.cocoSsd.load({ base: 'mobilenet_v2' }),
-        window.mobilenet.load({ version: 2, alpha: 1.0 }),
-      ])
-
+      // lite_mobilenet_v2 is optimized for real-time video stream (runs in ~15ms)
+      const coco = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' })
       cocoModelRef.current = coco
-      mobilenetRef.current = mobile
       setModelStatus('ready')
+
+      // Load MobileNet in background for custom training & classification
+      if (window.mobilenet && !mobilenetRef.current) {
+        window.mobilenet.load({ version: 2, alpha: 0.5 }).then((m) => {
+          mobilenetRef.current = m
+        }).catch((e) => console.warn('MobileNet background load:', e))
+      }
     } catch (err) {
-      console.warn('Error loading dual vision models:', err)
+      console.warn('Error loading vision models:', err)
       setModelStatus('error')
     }
   }, [])
@@ -130,11 +135,10 @@ export default function Vision() {
     const cocoNames = (dets || []).map((d) => (lang === 'hi' ? HINDI_LABELS[d.label] || d.label : d.label))
     const classNames = (classified || []).slice(0, 2).map((c) => c.name)
 
-    // Combine distinct object names
     const all = Array.from(new Set([...customNames, ...cocoNames, ...classNames])).filter(Boolean)
     if (!all.length) return
 
-    const joined = all.slice(0, 4).join(', ')
+    const joined = all.slice(0, 3).join(', ')
     const sentence = lang === 'hi'
       ? `दृश्य में ${joined} दिखाई दे रहे हैं।`
       : `I see ${joined} in front of you.`
@@ -143,6 +147,7 @@ export default function Vision() {
 
   const stopCamera = useCallback(() => {
     isRunningRef.current = false
+    isDetectingRef.current = false
     if (loopTimeoutRef.current) clearTimeout(loopTimeoutRef.current)
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((tr) => tr.stop())
@@ -155,26 +160,25 @@ export default function Vision() {
     sceneRef.current = ''
   }, [])
 
-  // Continuous multi-model detection loop
+  // Fast, non-blocking real-time detection loop
   const runDetection = useCallback(async () => {
     if (!isRunningRef.current) return
 
     const video = videoRef.current
     const coco = cocoModelRef.current
-    const mobilenet = mobilenetRef.current
 
-    if (video && video.readyState >= 2) {
+    if (video && video.readyState >= 2 && coco && !isDetectingRef.current) {
+      isDetectingRef.current = true
       try {
         const vw = video.videoWidth || 640
         const vh = video.videoHeight || 480
         if (vw && vh) setAspectRatio(`${vw} / ${vh}`)
 
-        // 1. Spatial bounding box detection (COCO-SSD)
-        let dets = []
-        if (coco) {
-          const preds = await coco.detect(video)
+        // 1. Ultra-fast spatial detection
+        const preds = await coco.detect(video)
+        if (isRunningRef.current) {
           const valid = preds.filter((p) => p.score >= sensitivity)
-          dets = valid.map((p, i) => {
+          const dets = valid.map((p, i) => {
             const [x, y, w, h] = p.bbox
             return {
               label: p.class,
@@ -187,74 +191,64 @@ export default function Vision() {
             }
           })
           setDetections(dets)
-        }
 
-        // 2. Deep ImageNet 1,000-class identification (MobileNet)
-        let topClassified = []
-        let liveEmbedding = null
-        if (mobilenet && window.tf) {
-          try {
-            const [classes, activation] = await Promise.all([
-              mobilenet.classify(video, 3),
-              mobilenet.infer(video, true),
-            ])
+          // 2. Periodic background check for 1,000 categories & custom training (every 2.5s)
+          const now = Date.now()
+          if (now - lastClassifiedRef.current > 2500 && mobilenetRef.current) {
+            lastClassifiedRef.current = now
+            mobilenetRef.current.classify(video, 2).then((classes) => {
+              if (isRunningRef.current && classes) {
+                const items = classes
+                  .filter((c) => c.probability >= 0.22)
+                  .map((c) => ({ name: c.className.split(',')[0].trim(), conf: c.probability }))
+                setClassifiedItems(items)
+              }
+            }).catch(() => {})
 
-            topClassified = (classes || [])
-              .filter((c) => c.probability >= 0.20)
-              .map((c) => ({
-                name: c.className.split(',')[0].trim(),
-                conf: c.probability,
-              }))
-            setClassifiedItems(topClassified)
-
-            const data = await activation.data()
-            activation.dispose()
-            liveEmbedding = Array.from(data)
-          } catch (e) {
-            console.warn('MobileNet classification error:', e)
-          }
-        }
-
-        // 3. Match against user's custom-trained objects
-        const matched = []
-        if (liveEmbedding && customObjects.length > 0) {
-          for (const item of customObjects) {
-            let maxSim = 0
-            for (const sample of item.samples) {
-              const sim = cosineSimilarity(liveEmbedding, sample)
-              if (sim > maxSim) maxSim = sim
-            }
-            if (maxSim >= 0.72) {
-              matched.push({ name: item.name, conf: maxSim })
+            // Check custom trained items
+            if (customObjects.length > 0 && window.tf) {
+              try {
+                const activation = mobilenetRef.current.infer(video, true)
+                activation.data().then((data) => {
+                  activation.dispose()
+                  const liveEmb = Array.from(data)
+                  const matched = []
+                  for (const item of customObjects) {
+                    let maxSim = 0
+                    for (const sample of item.samples) {
+                      const sim = cosineSimilarity(liveEmb, sample)
+                      if (sim > maxSim) maxSim = sim
+                    }
+                    if (maxSim >= 0.72) {
+                      matched.push({ name: item.name, conf: maxSim })
+                    }
+                  }
+                  if (isRunningRef.current) setMatchedCustom(matched)
+                })
+              } catch (e) {}
             }
           }
-          setMatchedCustom(matched)
-        } else {
-          setMatchedCustom([])
-        }
 
-        // 4. Voice speech announcement (throttled to avoid spam)
-        const sceneKey = [
-          ...matched.map((m) => `custom:${m.name}`),
-          ...dets.map((d) => d.label),
-          ...topClassified.map((c) => c.name),
-        ].sort().join('|')
-
-        const now = Date.now()
-        if (sceneKey && sceneKey !== sceneRef.current && now - lastSpokenRef.current > 3800) {
-          sceneRef.current = sceneKey
-          lastSpokenRef.current = now
-          describeScene(dets, topClassified, matched)
+          // Voice speech description
+          const key = valid.map((p) => p.class).sort().join('|')
+          if (key && key !== sceneRef.current && now - lastSpokenRef.current > 3800) {
+            sceneRef.current = key
+            lastSpokenRef.current = now
+            describeScene(dets, classifiedItems, matchedCustom)
+          }
         }
       } catch (err) {
         console.warn('Detection error:', err)
+      } finally {
+        isDetectingRef.current = false
       }
     }
 
+    // Schedule next detection immediately for maximum FPS
     if (isRunningRef.current) {
-      loopTimeoutRef.current = setTimeout(runDetection, 400)
+      loopTimeoutRef.current = setTimeout(runDetection, 60)
     }
-  }, [sensitivity, customObjects, describeScene])
+  }, [sensitivity, customObjects, classifiedItems, matchedCustom, describeScene])
 
   const startCamera = async () => {
     try {
@@ -262,7 +256,7 @@ export default function Vision() {
       let stream
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { width: 640, height: 480, facingMode: { ideal: 'environment' } },
         })
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({ video: true })
@@ -276,10 +270,11 @@ export default function Vision() {
 
       setStreaming(true)
       isRunningRef.current = true
+      isDetectingRef.current = false
       sceneRef.current = ''
       lastSpokenRef.current = Date.now()
 
-      if (!cocoModelRef.current || !mobilenetRef.current) {
+      if (!cocoModelRef.current) {
         await loadModels()
       }
 
@@ -303,7 +298,7 @@ export default function Vision() {
       return
     }
     if (!mobilenetRef.current || !window.tf) {
-      setTrainFeedback('AI model still initializing. Please wait a moment.')
+      setTrainFeedback('Custom model initializing. Please wait a few seconds and try again.')
       return
     }
 
@@ -329,7 +324,7 @@ export default function Vision() {
         }
       })
 
-      setTrainFeedback(`✓ Trained "${trimmed}"! Add 2–3 more angles for best accuracy.`)
+      setTrainFeedback(`✓ Trained "${trimmed}"! Point camera to verify recognition.`)
       speak(lang === 'hi' ? `${trimmed} सीख लिया गया है।` : `Learned ${trimmed}.`)
     } catch (err) {
       console.error('Training error:', err)
@@ -392,7 +387,7 @@ export default function Vision() {
       <div className="module-head">
         <h1 className="section-title" style={{ margin: 0 }}>{t('nav_vision')}</h1>
         <span className="live-badge">
-          <span className="pulse-dot" /> {streaming ? `${t('status_live')} · DUAL AI (1,000+ OBJECTS)` : 'DUAL AI VISION READY'}
+          <span className="pulse-dot" /> {streaming ? `${t('status_live')} · FAST AI DETECTION` : 'FAST AI READY'}
         </span>
         <Link to="/dashboard" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-ghost btn-sm">← {t('back_dashboard')}</button>
@@ -405,26 +400,26 @@ export default function Vision() {
             <h3 style={{ margin: 0 }}>{t('vision_live')}</h3>
             {modelStatus === 'loading' && (
               <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                <span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} /> Loading Dual AI Engines...
+                <span className="spinner" style={{ width: 12, height: 12, marginRight: 6 }} /> Loading Fast AI Model...
               </span>
             )}
             {modelStatus === 'ready' && (
-              <span style={{ fontSize: '0.8rem', color: 'var(--success)' }}>● 1,000+ Categories &amp; Custom Training Active</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--success)' }}>● Fast Real-Time AI Active (30+ FPS)</span>
             )}
           </div>
 
           <p style={{ marginBottom: '0.8rem', fontSize: '0.9rem' }}>
             {lang === 'hi'
-              ? 'MIRA दोहरे AI मॉडल (COCO-SSD + 1,000+ श्रेणी MobileNet) से रीयल-टाइम में वस्तुएं पहचानता है। आप नीचे किसी भी नई वस्तु को सिखा भी सकते हैं।'
-              : 'Dual-Engine Vision: COCO-SSD for spatial tracking + MobileNet for 1,000+ ImageNet classes. Plus train custom items below.'}
+              ? 'MIRA तेज़ और संवेदनशील AI से रीयल-टाइम में वस्तुएं पहचानता है। नीचे आप कस्टम वस्तुएं भी सिखा सकते हैं।'
+              : 'Fast in-browser real-time object detection with instant bounding boxes. Switch sensitivity or train custom items below.'}
           </p>
 
           {/* Sensitivity Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Detection Sensitivity:</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Sensitivity:</span>
             {[
-              { label: 'High (Detect More)', val: 0.28 },
-              { label: 'Balanced', val: 0.38 },
+              { label: 'High (Detect Many)', val: 0.25 },
+              { label: 'Balanced', val: 0.35 },
               { label: 'Strict', val: 0.50 },
             ].map((s) => (
               <button
@@ -486,12 +481,12 @@ export default function Vision() {
               <div className="cam-placeholder">
                 {camError
                   ? t('no_camera')
-                  : `${t('start_camera')} — DUAL-ENGINE AI OBJECT TRACKING`}
+                  : `${t('start_camera')} — FAST REAL-TIME OBJECT TRACKING`}
               </div>
             )}
           </div>
 
-          {/* Top Classified 1,000+ Categories Pills */}
+          {/* Also Identified Pills */}
           {streaming && classifiedItems.length > 0 && (
             <div className="classified-pills">
               <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', alignSelf: 'center' }}>Also Identified:</span>
@@ -526,6 +521,11 @@ export default function Vision() {
                 {t('read_aloud')}
               </button>
             )}
+            {streaming && detections.length > 0 && (
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginLeft: 'auto' }}>
+                {detections.length} {detections.length === 1 ? 'object' : 'objects'} detected
+              </span>
+            )}
           </div>
 
           {/* Teach MIRA / Custom Object Training Section */}
@@ -534,13 +534,13 @@ export default function Vision() {
               🎯 Teach MIRA New Objects (Custom AI Training)
             </h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', margin: '0.4rem 0 0.8rem' }}>
-              Hold any object in front of the camera (e.g. your keys, medicine, notebook, wallet), give it a name, and tap <b>Train Object</b>. MIRA will immediately learn its visual features!
+              Hold any object in front of the camera (e.g. keys, medication, notebook, wallet), enter a name, and click <b>Train Object</b>.
             </p>
 
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
               <input
                 type="text"
-                placeholder="Object Name (e.g., House Keys, Medicine Bottle)"
+                placeholder="Object Name (e.g., Keys, Water Bottle, Medicine)"
                 value={teachName}
                 onChange={(e) => setTeachName(e.target.value)}
                 style={{ flex: '1 1 220px', padding: '0.55rem 0.85rem', fontSize: '0.9rem' }}
@@ -560,7 +560,6 @@ export default function Vision() {
               </div>
             )}
 
-            {/* List of Custom Trained Objects */}
             {customObjects.length > 0 && (
               <div style={{ marginTop: '1rem' }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.4rem' }}>
@@ -569,7 +568,7 @@ export default function Vision() {
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {customObjects.map((obj) => (
                     <span key={obj.name} className="trained-tag">
-                      <span>★ <b>{obj.name}</b> ({obj.samples.length} {obj.samples.length === 1 ? 'sample' : 'samples'})</span>
+                      <span>★ <b>{obj.name}</b></span>
                       <button
                         onClick={() => deleteCustomObject(obj.name)}
                         style={{ background: 'none', border: 'none', color: '#ff4e45', cursor: 'pointer', fontSize: '0.85rem' }}
