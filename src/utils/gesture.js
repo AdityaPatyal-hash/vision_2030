@@ -34,18 +34,23 @@ function getHandDetails(lm) {
   }
 }
 
+// Symmetric helper to test rules in both directions (h1 as base, h2 as acting OR h2 as base, h1 as acting)
+function testBoth(h1, h2, fn) {
+  return fn(h1, h2) || fn(h2, h1)
+}
+
 export function classifyISL(multiHands) {
   if (!multiHands || !multiHands.length) return null
 
   // If only 1 hand is visible
   if (multiHands.length === 1) {
     const h = getHandDetails(multiHands[0])
-    // C is single-handed curved shape
+    // C is single-handed curved C shape
     const isCurved =
-      dist(h.lm[8], h.lm[0]) < dist(h.lm[6], h.lm[0]) * 1.15 &&
-      dist(h.lm[8], h.lm[0]) > dist(h.lm[5], h.lm[0]) * 0.85
+      dist(h.lm[8], h.lm[0]) < dist(h.lm[6], h.lm[0]) * 1.18 &&
+      dist(h.lm[8], h.lm[0]) > dist(h.lm[5], h.lm[0]) * 0.8
     const thumbIndexGap = dist(h.lm[4], h.lm[8])
-    if (isCurved && thumbIndexGap > h.handSize * 0.4 && thumbIndexGap < h.handSize * 0.95) {
+    if (isCurved && thumbIndexGap > h.handSize * 0.35 && thumbIndexGap < h.handSize * 1.0) {
       return 'C'
     }
     return null
@@ -56,183 +61,217 @@ export function classifyISL(multiHands) {
   const h2 = getHandDetails(multiHands[1])
   const avgHandSize = (h1.handSize + h2.handSize) / 2
 
-  // Determine base (passive open palm or pointing) vs acting (pointing/shaping) hand
-  let base = h1
-  let acting = h2
-  if (h2.extendedCount > h1.extendedCount) {
-    base = h2
-    acting = h1
-  }
-
-  const actingTip = acting.lm[8] // Dominant index fingertip
-
   // ==========================================
-  // 1. ISL VOWELS (A, E, I, O, U)
-  // Non-dominant hand flat; dominant index touches one of the 5 fingertips.
-  // Thumb = A, Index = E, Middle = I, Ring = O, Pinky = U
-  // ==========================================
-  if (base.extendedCount >= 3) {
-    const dA = dist(actingTip, base.lm[4])  // Thumb tip
-    const dE = dist(actingTip, base.lm[8])  // Index tip
-    const dI = dist(actingTip, base.lm[12]) // Middle tip
-    const dO = dist(actingTip, base.lm[16]) // Ring tip
-    const dU = dist(actingTip, base.lm[20]) // Pinky tip
-
-    const minVowelDist = Math.min(dA, dE, dI, dO, dU)
-    if (minVowelDist < avgHandSize * 0.48) {
-      if (minVowelDist === dA) return 'A'
-      if (minVowelDist === dE) return 'E'
-      if (minVowelDist === dI) return 'I'
-      if (minVowelDist === dO) return 'O'
-      if (minVowelDist === dU) return 'U'
-    }
-
-    // ==========================================
-    // 2. PALM TOUCH CONSONANTS (M, N, L, V, H, R, Z, T)
-    // Acting fingers resting on or touching base palm
-    // ==========================================
-    const palmCenter = base.lm[9] // MCP of middle finger (center of palm)
-    const distToPalm = dist(actingTip, palmCenter)
-
-    if (distToPalm < avgHandSize * 0.6) {
-      // V: Dominant index & middle spread apart resting on base palm
-      if (acting.index && acting.middle && !acting.ring && !acting.pinky) {
-        const fingerSpread = dist(acting.lm[8], acting.lm[12])
-        if (fingerSpread > avgHandSize * 0.25) return 'V'
-        // N: Two fingers close together on base palm
-        return 'N'
-      }
-
-      // M: Three fingers (index, middle, ring) on base palm
-      if (acting.index && acting.middle && acting.ring && !acting.pinky) {
-        return 'M'
-      }
-
-      // L: Single dominant index resting across base palm
-      if (acting.index && !acting.middle && !acting.ring && !acting.pinky && !acting.thumbOut) {
-        return 'L'
-      }
-
-      // H: Both flat palms sliding across each other
-      if (acting.extendedCount >= 3) {
-        return 'H'
-      }
-
-      // R: Curved index resting in palm
-      if (!acting.middle && !acting.ring && !acting.pinky) {
-        return 'R'
-      }
-
-      // Z: Perpendicular hand edge touching palm
-      return 'Z'
-    }
-
-    // T: Dominant index touches lower edge of base hand near wrist
-    if (dist(actingTip, base.wrist) < avgHandSize * 0.42) {
-      return 'T'
-    }
-
-    // Y: Dominant index placed in the crook between thumb & index of base hand
-    if (dist(actingTip, base.lm[2]) < avgHandSize * 0.4) {
-      return 'Y'
-    }
-  }
-
-  // ==========================================
-  // 3. X: Crossed Index Fingers
+  // 1. ISL LETTER 'X' (Both index fingers crossed)
   // ==========================================
   if (h1.index && !h1.ring && !h1.pinky && h2.index && !h2.ring && !h2.pinky) {
-    const indexCrossDist = dist(h1.lm[8], h2.lm[7])
-    const indexCrossDist2 = dist(h2.lm[8], h1.lm[7])
     const tipDist = dist(h1.lm[8], h2.lm[8])
-    if (Math.min(indexCrossDist, indexCrossDist2, tipDist) < avgHandSize * 0.42) {
+    const cross1 = dist(h1.lm[8], h2.lm[6])
+    const cross2 = dist(h2.lm[8], h1.lm[6])
+    if (Math.min(tipDist, cross1, cross2) < avgHandSize * 0.45) {
       return 'X'
     }
   }
 
   // ==========================================
-  // 4. G: Stacked Fists (Both closed, one on top of the other)
+  // 2. ISL LETTER 'B' (Thumbs & index fingers of both hands touching in double-loop)
+  // ==========================================
+  const indexDist = dist(h1.lm[8], h2.lm[8])
+  const thumbDist = dist(h1.lm[4], h2.lm[4])
+  if (indexDist < avgHandSize * 0.48 && thumbDist < avgHandSize * 0.55) {
+    return 'B'
+  }
+
+  // ==========================================
+  // 3. ISL LETTER 'G' (Stacked fists, one above the other)
   // ==========================================
   if (h1.extendedCount === 0 && h2.extendedCount === 0) {
     const xDiff = Math.abs(h1.wrist.x - h2.wrist.x)
     const yDiff = Math.abs(h1.wrist.y - h2.wrist.y)
-    if (xDiff < avgHandSize * 1.1 && yDiff > avgHandSize * 0.35 && yDiff < avgHandSize * 1.8) {
+    if (xDiff < avgHandSize * 1.2 && yDiff > avgHandSize * 0.3 && yDiff < avgHandSize * 1.9) {
       return 'G'
     }
   }
 
   // ==========================================
-  // 5. B: Double Loop (Thumbs and index fingers of both hands touching)
-  // ==========================================
-  const indexDist = dist(h1.lm[8], h2.lm[8])
-  const thumbDist = dist(h1.lm[4], h2.lm[4])
-  if (indexDist < avgHandSize * 0.42 && thumbDist < avgHandSize * 0.42) {
-    return 'B'
-  }
-
-  // ==========================================
-  // 6. D, K, P: Upright Index Base Hand
-  // Base index pointing up, acting hand forms loop or touches joint
-  // ==========================================
-  const isUpright = (h) => h.index && !h.middle && !h.ring && !h.pinky && h.lm[8].y < h.lm[6].y
-  if (isUpright(base)) {
-    // P: Loop formed at the top of the upright index
-    if (dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.38 && dist(acting.lm[4], base.lm[8]) < avgHandSize * 0.38) {
-      return 'P'
-    }
-    // D: Acting thumb and index touch base index to complete 'D'
-    if (dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.45 && dist(acting.lm[4], base.lm[5]) < avgHandSize * 0.45) {
-      return 'D'
-    }
-    // K: Acting hooked index touches the joint of base index
-    if (dist(acting.lm[8], base.lm[6]) < avgHandSize * 0.38) {
-      return 'K'
-    }
-  }
-
-  // ==========================================
-  // 7. F: Crossed Pairs of Fingers (2 fingers cross 2 fingers)
-  // ==========================================
-  if (h1.index && h1.middle && !h1.ring && !h1.pinky && h2.index && h2.middle && !h2.ring && !h2.pinky) {
-    if (dist(h1.lm[8], h2.lm[10]) < avgHandSize * 0.45 && dist(h2.lm[8], h1.lm[10]) < avgHandSize * 0.45) {
-      return 'F'
-    }
-  }
-
-  // ==========================================
-  // 8. W: Both Hands Interlocked/Upright (W Shape)
+  // 4. ISL LETTER 'W' (Both hands upright, fingers interlocked or aligned)
   // ==========================================
   if (h1.extendedCount >= 3 && h2.extendedCount >= 3) {
-    if (dist(h1.lm[8], h2.lm[8]) < avgHandSize * 0.45 && dist(h1.lm[12], h2.lm[12]) < avgHandSize * 0.5) {
+    const tipsClose = dist(h1.lm[8], h2.lm[8]) < avgHandSize * 0.55 && dist(h1.lm[12], h2.lm[12]) < avgHandSize * 0.6
+    const bothUp = h1.lm[8].y < h1.lm[6].y && h2.lm[8].y < h2.lm[6].y
+    if (tipsClose && bothUp) {
       return 'W'
     }
   }
 
   // ==========================================
-  // 9. S: Pinkies Hooked Together
+  // 5. ISL LETTER 'F' (Two fingers of dominant hand crossing two fingers of non-dominant hand)
   // ==========================================
-  if (dist(h1.lm[20], h2.lm[20]) < avgHandSize * 0.32) {
+  const fCheck = (base, acting) => {
+    if (base.index && base.middle && !base.ring && !base.pinky && acting.index && acting.middle && !acting.ring && !acting.pinky) {
+      const crossDist = dist(acting.lm[8], base.lm[10])
+      const crossDist2 = dist(acting.lm[12], base.lm[6])
+      if (Math.min(crossDist, crossDist2) < avgHandSize * 0.45) return 'F'
+    }
+    return null
+  }
+  const fRes = testBoth(h1, h2, fCheck)
+  if (fRes) return fRes
+
+  // ==========================================
+  // 6. ISL LETTERS D, P, K (Upright index on base hand)
+  // ==========================================
+  const uprightIndexCheck = (base, acting) => {
+    // Base hand has index pointing up
+    const baseUpright = base.index && !base.middle && !base.ring && !base.pinky && base.lm[8].y < base.lm[6].y
+    if (!baseUpright) return null
+
+    // P: Loop formed at the top of the upright index
+    const loopAtTop = dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.45 && dist(acting.lm[4], base.lm[8]) < avgHandSize * 0.52
+    if (loopAtTop) return 'P'
+
+    // D: Acting thumb and index form semicircle touching upright index tip & base
+    const touchTop = dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.55 || dist(acting.lm[4], base.lm[8]) < avgHandSize * 0.55
+    const touchBottom = dist(acting.lm[4], base.lm[5]) < avgHandSize * 0.65 || dist(acting.lm[8], base.lm[5]) < avgHandSize * 0.65 || dist(acting.lm[4], base.wrist) < avgHandSize * 0.75
+    if (touchTop && touchBottom) return 'D'
+
+    // Also catch D when acting hand forms C touching upright index
+    if (dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.48 && dist(acting.lm[4], base.lm[6]) < avgHandSize * 0.55) {
+      return 'D'
+    }
+
+    // K: Acting hooked index touches the joint (PIP) of base index
+    if (dist(acting.lm[8], base.lm[6]) < avgHandSize * 0.42 && !acting.middle) {
+      return 'K'
+    }
+
+    return null
+  }
+  const uprightRes = testBoth(h1, h2, uprightIndexCheck)
+  if (uprightRes) return uprightRes
+
+  // ==========================================
+  // 7. ISL LETTER S (Pinkies hooked together)
+  // ==========================================
+  if (dist(h1.lm[20], h2.lm[20]) < avgHandSize * 0.35) {
     return 'S'
   }
 
   // ==========================================
-  // 10. Q: Hook through Loop
+  // 8. ISL LETTER Q (Hook through/into loop)
   // ==========================================
-  const isLoop = (h) => dist(h.lm[4], h.lm[8]) < avgHandSize * 0.3
-  if (isLoop(base) && dist(actingTip, base.lm[8]) < avgHandSize * 0.38) {
-    return 'Q'
+  const qCheck = (base, acting) => {
+    const isLoop = dist(base.lm[4], base.lm[8]) < avgHandSize * 0.35
+    if (isLoop && dist(acting.lm[8], base.lm[8]) < avgHandSize * 0.42) {
+      return 'Q'
+    }
+    return null
   }
+  const qRes = testBoth(h1, h2, qCheck)
+  if (qRes) return qRes
+
+  // ==========================================
+  // 9. ISL VOWELS (A, E, I, O, U)
+  // Open base hand (at least 2 fingers extended + thumb available).
+  // Acting index touches: Thumb = A, Index = E, Middle = I, Ring = O, Pinky = U.
+  // ==========================================
+  const vowelCheck = (base, acting) => {
+    // Base hand should be relatively open
+    if (base.extendedCount >= 2) {
+      const actingTip = acting.lm[8] // Pointer fingertip
+
+      const dA = dist(actingTip, base.lm[4])  // Thumb tip
+      const dE = dist(actingTip, base.lm[8])  // Index tip
+      const dI = dist(actingTip, base.lm[12]) // Middle tip
+      const dO = dist(actingTip, base.lm[16]) // Ring tip
+      const dU = dist(actingTip, base.lm[20]) // Pinky tip
+
+      const minVowelDist = Math.min(dA, dE, dI, dO, dU)
+
+      // Generous distance threshold so touching is easy and natural
+      if (minVowelDist < avgHandSize * 0.55) {
+        if (minVowelDist === dA) return 'A'
+        if (minVowelDist === dE) return 'E'
+        if (minVowelDist === dI) return 'I'
+        if (minVowelDist === dO) return 'O'
+        if (minVowelDist === dU) return 'U'
+      }
+    }
+    return null
+  }
+  const vowelRes = testBoth(h1, h2, vowelCheck)
+  if (vowelRes) return vowelRes
+
+  // ==========================================
+  // 10. PALM INTERACTION CONSONANTS (M, N, V, L, Y, T, H, R, Z)
+  // ==========================================
+  const palmCheck = (base, acting) => {
+    if (base.extendedCount >= 2) {
+      const actingTip = acting.lm[8]
+      const palmCenter = base.lm[9]
+      const distToPalm = dist(actingTip, palmCenter)
+
+      // Y: Dominant index placed in the crook/V between base thumb and index
+      const distToCrook = dist(actingTip, base.lm[2])
+      if (distToCrook < avgHandSize * 0.42 && base.thumbOut) {
+        return 'Y'
+      }
+
+      // T: Dominant index touches lower edge near base wrist
+      const distToWrist = dist(actingTip, base.wrist)
+      if (distToWrist < avgHandSize * 0.45 && distToPalm > avgHandSize * 0.35) {
+        return 'T'
+      }
+
+      // Touches on the palm surface
+      if (distToPalm < avgHandSize * 0.65) {
+        // V: Two fingers spread in V on palm
+        if (acting.index && acting.middle && !acting.ring && !acting.pinky) {
+          const spread = dist(acting.lm[8], acting.lm[12])
+          if (spread > avgHandSize * 0.22) return 'V'
+          // N: Two fingers together on palm
+          return 'N'
+        }
+
+        // M: Three fingers (index, middle, ring) on palm
+        if (acting.index && acting.middle && acting.ring && !acting.pinky) {
+          return 'M'
+        }
+
+        // L: Single dominant index resting across palm
+        if (acting.index && !acting.middle && !acting.ring && !acting.pinky && !acting.thumbOut) {
+          return 'L'
+        }
+
+        // H: Both flat palms sliding across each other
+        if (acting.extendedCount >= 3) {
+          return 'H'
+        }
+
+        // R: Curled index on palm
+        if (!acting.middle && !acting.ring && !acting.pinky) {
+          return 'R'
+        }
+
+        // Z: Perpendicular hand edge touching palm
+        return 'Z'
+      }
+    }
+    return null
+  }
+  const palmRes = testBoth(h1, h2, palmCheck)
+  if (palmRes) return palmRes
 
   return null
 }
 
 export const LETTER_GUIDES = {
   A: {
-    en: 'Hold your non-dominant hand flat; touch the THUMB tip with your dominant index finger.',
+    en: 'Hold non-dominant hand flat palm forward; touch the THUMB tip with dominant index finger.',
     hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसके अंगूठे (Thumb) के सिरे को छुएँ।',
   },
   B: {
-    en: 'Touch the thumbs and index fingers of both hands together to form the double loop of B.',
+    en: 'Touch thumbs and index fingers of both hands together to form the double loop of B.',
     hi: 'दोनों हाथों के अंगूठे और तर्जनी को आपस में मिलाकर B के दो घेरे बनाएँ।',
   },
   C: {
@@ -244,7 +283,7 @@ export const LETTER_GUIDES = {
     hi: 'बाएँ हाथ की तर्जनी सीधी ऊपर रखें; दाएँ हाथ के अंगूठे व तर्जनी से अर्धवृत्त बनाकर D बनाएँ।',
   },
   E: {
-    en: 'Hold non-dominant hand flat; touch the INDEX fingertip with your dominant index finger.',
+    en: 'Hold non-dominant hand flat; touch the INDEX fingertip with dominant index finger.',
     hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी तर्जनी (Index finger) के सिरे को छुएँ।',
   },
   F: {
@@ -252,23 +291,23 @@ export const LETTER_GUIDES = {
     hi: 'एक हाथ की दो उंगलियों (तर्जनी व मध्यमा) पर दूसरे हाथ की दो उंगलियाँ क्रॉस करके रखें।',
   },
   G: {
-    en: 'Make two closed fists and stack your dominant fist directly on top of the non-dominant fist.',
+    en: 'Make two closed fists and stack dominant fist directly on top of non-dominant fist.',
     hi: 'दोनों हाथों की मुट्ठियाँ बनाएँ और एक मुट्ठी को दूसरी मुट्ठी के ऊपर रखें।',
   },
   H: {
-    en: 'Hold non-dominant hand flat; sweep your dominant flat palm across it from wrist to fingers.',
+    en: 'Hold non-dominant hand flat; sweep dominant flat palm across it from wrist to fingers.',
     hi: 'एक हथेली सीधी रखें और दूसरे हाथ की हथेली से उस पर सीधी रेखा खींचें।',
   },
   I: {
-    en: 'Hold non-dominant hand flat; touch the MIDDLE fingertip with your dominant index finger.',
+    en: 'Hold non-dominant hand flat; touch the MIDDLE fingertip with dominant index finger.',
     hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी बीच वाली उंगली (मध्यमा) के सिरे को छुएँ।',
   },
   J: {
-    en: 'Touch the middle fingertip of non-dominant hand, then trace down into the center of the palm.',
+    en: 'Touch middle fingertip of non-dominant hand, then trace down into the palm.',
     hi: 'मध्यमा उंगली के सिरे से शुरू करके हथेली के बीच तक नीचे की ओर उंगली घुमाएँ।',
   },
   K: {
-    en: 'Hold non-dominant index straight up; touch its joint with dominant hooked index finger.',
+    en: 'Hold non-dominant index straight up; touch its middle joint with dominant hooked index finger.',
     hi: 'एक हाथ की तर्जनी सीधी रखें, दूसरे हाथ की मुड़ी हुई तर्जनी से उसके जोड़ को छुएँ।',
   },
   L: {
@@ -284,7 +323,7 @@ export const LETTER_GUIDES = {
     hi: 'खुली हथेली पर दूसरे हाथ की दो उंगलियाँ (तर्जनी व मध्यमा) रखें।',
   },
   O: {
-    en: 'Hold non-dominant hand flat; touch the RING fingertip with your dominant index finger.',
+    en: 'Hold non-dominant hand flat; touch the RING fingertip with dominant index finger.',
     hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी अनामिका (Ring finger) के सिरे को छुएँ।',
   },
   P: {
@@ -296,7 +335,7 @@ export const LETTER_GUIDES = {
     hi: 'एक हाथ से घेरा बनाएँ और दूसरे हाथ की तर्जनी को उसमें हुक की तरह जोड़ें।',
   },
   R: {
-    en: 'Hook your dominant index finger and rest it curved in the palm of non-dominant hand.',
+    en: 'Hook dominant index finger and rest it curved in the palm of non-dominant hand.',
     hi: 'दाएँ हाथ की तर्जनी को हल्का सा मोड़कर बाएँ हाथ की खुली हथेली पर रखें।',
   },
   S: {
@@ -308,7 +347,7 @@ export const LETTER_GUIDES = {
     hi: 'खुले हाथ के निचले किनारे पर दूसरे हाथ की तर्जनी उंगली छुएँ।',
   },
   U: {
-    en: 'Hold non-dominant hand flat; touch the PINKY fingertip with your dominant index finger.',
+    en: 'Hold non-dominant hand flat; touch the PINKY fingertip with dominant index finger.',
     hi: 'एक हाथ खुला रखें; दूसरे हाथ की तर्जनी से उसकी सबसे छोटी उंगली (कनिष्ठिका) के सिरे को छुएँ।',
   },
   V: {
