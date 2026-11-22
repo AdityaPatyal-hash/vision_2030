@@ -63,6 +63,7 @@ export default function Vision() {
   const [camError, setCamError] = useState(false)
   const [modelStatus, setModelStatus] = useState('loading')
   const [sensitivity, setSensitivity] = useState(0.25) // Low threshold for high recall
+  const [mirrored, setMirrored] = useState(false)
   const [detections, setDetections] = useState([])
   const [classifiedItems, setClassifiedItems] = useState([])
   const [matchedCustom, setMatchedCustom] = useState([])
@@ -434,7 +435,7 @@ export default function Vision() {
           </div>
 
           {/* Camera Viewport */}
-          <div className={`cam-panel ${streaming ? 'scanning' : ''}`} style={{ aspectRatio }}>
+          <div className={`cam-panel ${streaming ? 'scanning' : ''} ${mirrored ? 'mirrored' : ''}`} style={{ aspectRatio }}>
             <video ref={videoRef} muted playsInline />
 
             {/* Custom Trained Match Banner */}
@@ -465,7 +466,7 @@ export default function Vision() {
                 key={i}
                 className={`det-box ${d.second ? 'second' : ''}`}
                 style={{
-                  left: `${d.left}%`,
+                  left: mirrored ? `${100 - (d.left + d.width)}%` : `${d.left}%`,
                   top: `${d.top}%`,
                   width: `${d.width}%`,
                   height: `${d.height}%`,
@@ -504,6 +505,15 @@ export default function Vision() {
               <button className="btn" onClick={startCamera}>{t('start_camera')}</button>
             ) : (
               <button className="btn btn-ghost" onClick={stopCamera}>{t('stop_camera')}</button>
+            )}
+            {streaming && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => setMirrored((m) => !m)}
+                title="Flip/mirror camera horizontally"
+              >
+                🔄 {mirrored ? 'Mirrored (Flipped)' : 'Flip Camera'}
+              </button>
             )}
             {streaming && (
               <button className="btn btn-ghost" onClick={captureFrame}>

@@ -193,7 +193,8 @@ img, video, canvas { max-width: 100%; }
 
 /* ---------- Camera panel ---------- */
 .cam-panel { position: relative; border-radius: var(--radius); overflow: hidden; background: #000000; border: 1px solid var(--panel-border); aspect-ratio: 16 / 10; }
-.cam-panel video, .cam-panel canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cam-panel video, .cam-panel canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s ease; }
+.cam-panel.mirrored video, .cam-panel.mirrored canvas { transform: scaleX(-1); }
 .cam-placeholder {
   position: absolute; inset: 0; display: grid; place-items: center;
   color: var(--text-dim); text-align: center; padding: 1rem; font-size: 0.95rem;

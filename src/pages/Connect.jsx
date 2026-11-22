@@ -8,6 +8,7 @@ function HandTracker({ onLetter, active }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const [running, setRunning] = useState(false)
+  const [mirrored, setMirrored] = useState(true)
   const [error, setError] = useState('')
   const [liveLetter, setLiveLetter] = useState(null)
   const streamRef = useRef(null)
@@ -108,7 +109,7 @@ function HandTracker({ onLetter, active }) {
   useEffect(() => () => stop(), [stop])
 
   return (
-    <div className={`cam-panel ${running ? 'scanning' : ''}`} style={{ aspectRatio: '4/3' }}>
+    <div className={`cam-panel ${running ? 'scanning' : ''} ${mirrored ? 'mirrored' : ''}`} style={{ aspectRatio: '4/3' }}>
       <video ref={videoRef} muted playsInline />
       <canvas ref={canvasRef} />
 
@@ -140,7 +141,16 @@ function HandTracker({ onLetter, active }) {
         {!running ? (
           <button className="btn btn-sm" onClick={start}>Start Camera</button>
         ) : (
-          <button className="btn btn-ghost btn-sm" onClick={stop}>Stop</button>
+          <>
+            <button className="btn btn-ghost btn-sm" onClick={stop}>Stop</button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setMirrored((m) => !m)}
+              title="Toggle Flip / Mirror"
+            >
+              🔄 {mirrored ? 'Mirrored (Natural)' : 'Raw (Flipped)'}
+            </button>
+          </>
         )}
       </div>
     </div>
