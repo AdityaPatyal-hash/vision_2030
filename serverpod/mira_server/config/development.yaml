@@ -1,0 +1,24 @@
+apiServer:
+  port: 8080
+  publicHost: localhost
+  publicPort: 8080
+
+webServer:
+  port: 8082
+  publicHost: localhost
+  publicPort: 8082
+
+insightsServer:
+  port: 8081
+  publicHost: localhost
+  publicPort: 8081
+
+database:
+  host: localhost
+  port: 5432
+  name: mira
+  user: postgres
+  password: postgrespassword
+
+redis:
+  enabled: false

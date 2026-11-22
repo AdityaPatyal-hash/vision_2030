@@ -1,0 +1,17 @@
+apiServer:
+  port: 8080
+  publicHost: 0.0.0.0
+  publicPort: 8080
+
+webServer:
+  port: 8082
+  publicHost: 0.0.0.0
+  publicPort: 8082
+
+insightsServer:
+  port: 8081
+  publicHost: 0.0.0.0
+  publicPort: 8081
+
+redis:
+  enabled: false
