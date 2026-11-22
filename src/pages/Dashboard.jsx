@@ -15,8 +15,8 @@ export default function Dashboard() {
         <span>◉ Frontend · React + Vite — OK</span>
         <span>◉ OCR · Tesseract.js — OK</span>
         <span>◉ Voice · Web Speech API — OK</span>
-        <span>◐ Vision · YOLO backend — <span className="demo-tag">{t('demo_note')}</span></span>
-        <span style={{ marginLeft: 'auto' }}>{t('backend_hint')}</span>
+        <span>◉ Vision · COCO-SSD Real AI — OK</span>
+        <span style={{ marginLeft: 'auto' }}>TensorFlow.js · In-Browser ML Active</span>
       </div>
 
       <div className="grid grid-2">
